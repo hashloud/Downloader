@@ -1,5 +1,5 @@
-﻿using Microsoft.Data.Sqlite;
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
+using SQLite;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -13,7 +13,7 @@ namespace Downloader
 {
 	class Program
 	{
-		static void Main()
+		static void Main(string[] args)
 		{
 			MainAsync().Wait();
 		}
@@ -46,38 +46,48 @@ namespace Downloader
 				}
 			} while (count < maxCount);
 			Console.WriteLine(slugs.Count);
-			int id = 0;
 			foreach(var slug in slugs)
 			{
 				var res = await client.GetAsync($"https://support.allizom.org/api/1/kb/{slug}");
-				var json = await res.Content.ReadAsStringAsync();
-				dynamic response = JsonConvert.DeserializeObject(json);
-				var html = (string)response.html;
-				var strippedImagesHtml = Regex.Replace(html, "<img *?>", "");
-				Sqlite(id++, slug, strippedImagesHtml);
+				if (res.IsSuccessStatusCode)
+				{
+					var json = await res.Content.ReadAsStringAsync();
+					dynamic response = JsonConvert.DeserializeObject(json);
+					var html = (string)response.html;
+					var strippedImagesHtml = Regex.Replace(html, "<img *?>", "");
+					SqliteAdd(slug, strippedImagesHtml);
+					Console.WriteLine("Added slug: " + slug);
+					await File.WriteAllTextAsync(slug + ".html", strippedImagesHtml);
+				}
 			}
 			Console.ReadKey();
 		}
 
-		public static void Sqlite(int id, string slug, string html)
+		public static void SqliteAdd(string slug, string html)
 		{
-			bool needCreateTable = !File.Exists("hello.db");
-			using (var connection = new SqliteConnection("Data Source=hello.db"))
+			bool needCreateTable = !File.Exists("slugs.db");
+			using (var connection = new SQLiteConnection("slugs.db"))
 			{
-				connection.Open();
-
 				if( needCreateTable)
 				{
-					var createCommand = connection.CreateCommand();
-					createCommand.CommandText =	@"CREATE TABLE hello (id int PRIMARY KEY, slug varchar(255) NOT NULL, html text)";
-					createCommand.ExecuteNonQuery();
+					connection.CreateTable<Slugs>();
 				}
 
-				var command = connection.CreateCommand();
-				command.CommandText = $"INSERT hello (id={id}, slug='{slug}', html='{html}')";
-				//command.Parameters.AddWithValue("$id", id);
-				command.ExecuteNonQuery();
+				var slugs = new Slugs
+				{
+					Slug = slug,
+					Html = html
+				};
+				connection.Insert(slugs);
 			}
 		}
+	}
+	
+	public class Slugs
+	{
+		[PrimaryKey, AutoIncrement]
+		public int Id { get; set; }
+		public string Slug { get; set; }
+		public string Html { get; set; }
 	}
 }
